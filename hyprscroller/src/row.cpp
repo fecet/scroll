@@ -168,6 +168,13 @@ void Row::add_active_window(PHLWINDOW window)
             node = columns.emplace_before(columns.first(), new Column(window, this));
             break;
         }
+        // If we just transitioned from 1 -> 2 columns, reset both to default column widths
+        if (columns.size() == 2) {
+            for (auto c = columns.first(); c != nullptr; c = c->next()) {
+                auto defw = scroller_sizes.get_column_default_width(c->data()->get_active_window());
+                c->data()->update_width(defw, max.w);
+            }
+        }
         if (focus == ModeModifier::FOCUS_FOCUS || store_active == nullptr)
             active = node;
         else {
@@ -224,6 +231,11 @@ bool Row::remove_window(PHLWINDOW window)
                 if (columns.empty()) {
                     return false;
                 } else {
+                    // If only one column remains, apply single-column width
+                    if (columns.size() == 1) {
+                        auto only = columns.first()->data();
+                        only->update_width(scroller_sizes.get_single_column_width(), max.w);
+                    }
                     recalculate_row_geometry();
                     break;
                 }
@@ -912,6 +924,12 @@ void Row::admit_window(AdmitExpelDirection dir)
         w->pin(true);
     active->data()->admit_window(w);
 
+    // If only one column remains after admitting, apply single-column width
+    if (columns.size() == 1) {
+        auto only = columns.first()->data();
+        only->update_width(scroller_sizes.get_single_column_width(), max.w);
+    }
+
     reorder = Reorder::Auto;
     recalculate_row_geometry();
 
@@ -958,6 +976,13 @@ void Row::expel_window(AdmitExpelDirection dir)
         // Initialize the position so it is located after the previous column
         // This helps the heuristic in recalculate_row_geometry()
         active->data()->set_geom_pos(active->prev()->data()->get_geom_x() + active->prev()->data()->get_geom_w(), max.y);
+    }
+    // If we just transitioned from 1 -> 2 columns, reset both to default column widths
+    if (columns.size() == 2) {
+        for (auto c = columns.first(); c != nullptr; c = c->next()) {
+            auto defw = scroller_sizes.get_column_default_width(c->data()->get_active_window());
+            c->data()->update_width(defw, max.w);
+        }
     }
 
     reorder = Reorder::Auto;

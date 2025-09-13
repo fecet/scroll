@@ -85,6 +85,12 @@ StandardSize ScrollerSizes::get_column_width(int index)
     return get_size(column_widths, index);
 }
 
+StandardSize ScrollerSizes::get_single_column_width()
+{
+    update();
+    return single_column_width;
+}
+
 // ScrollerSizes
 Mode ScrollerSizes::get_mode(PHLMONITOR monitor)
 {
@@ -252,12 +258,14 @@ void ScrollerSizes::update()
 {
     static auto const *window_default_height_str = (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:window_default_height")->getDataStaticPtr();
     static auto const *column_default_width_str = (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:column_default_width")->getDataStaticPtr();
+    static auto const *single_column_width_str = (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:single_column_width")->getDataStaticPtr();
     static auto const *window_heights_str = (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:window_heights")->getDataStaticPtr();
     static auto const *column_widths_str = (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:column_widths")->getDataStaticPtr();
     static auto const *monitor_modes_str = (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:monitor_options")->getDataStaticPtr();
 
     if (*window_default_height_str == str_window_default_height &&
         *column_default_width_str == str_column_default_width &&
+        *single_column_width_str == str_single_column_width &&
         *window_heights_str == str_window_heights &&
         *column_widths_str == str_column_widths &&
         *monitor_modes_str == str_monitors)
@@ -265,11 +273,13 @@ void ScrollerSizes::update()
 
     window_default_height = get_size_from_string(*window_default_height_str, StandardSize::One);
     column_default_width = get_size_from_string(*column_default_width_str, StandardSize::OneHalf);
+    single_column_width = get_size_from_string(*single_column_width_str, StandardSize::One);
     update_sizes(window_heights, *window_heights_str, StandardSize::One);
     update_sizes(column_widths, *column_widths_str, StandardSize::OneHalf);
  
     str_window_default_height = *window_default_height_str;
     str_column_default_width = *column_default_width_str;
+    str_single_column_width = *single_column_width_str;
     str_window_heights = *window_heights_str;
     str_column_widths = *column_widths_str;
     str_monitors = *monitor_modes_str;

@@ -12,7 +12,12 @@ extern ScrollerSizes scroller_sizes;
 Column::Column(PHLWINDOW cwindow, const Row *row)
     : reorder(Reorder::Auto), row(row)
 {
-    width = scroller_sizes.get_column_default_width(cwindow);
+    // If this is the first column in the workspace, use the configured
+    // single-column width. Otherwise, fall back to the default column width.
+    if (row->size() == 0)
+        width = scroller_sizes.get_single_column_width();
+    else
+        width = scroller_sizes.get_column_default_width(cwindow);
     const Box &max = row->get_max();
     Window *window = new Window(cwindow, max.y, max.h, width);
     windows.push_back(window);
@@ -715,4 +720,3 @@ void Column::pin(bool pin) const
         win->data()->pin(pin);
     }
 }
-
