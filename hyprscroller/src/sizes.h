@@ -32,9 +32,11 @@ public:
 
   Mode get_mode(PHLMONITOR monitor);
   StandardSize get_window_default_height(PHLWINDOW window);
-  StandardSize get_column_default_width(PHLWINDOW window);
-  // Width to use when a workspace has a single column
-  StandardSize get_single_column_width();
+    StandardSize get_column_default_width(PHLWINDOW window);
+    // Width to use when a workspace has a single column
+    StandardSize get_single_column_width();
+    // Height to use when a column has a single window (column mode)
+    StandardSize get_single_row_height();
   StandardSize get_window_closest_height(PHLMONITORREF monitor, double fraction,
                                          int step);
   StandardSize get_column_closest_width(PHLMONITORREF monitor, double fraction,
@@ -60,15 +62,17 @@ private:
 
   std::string str_window_default_height;
   std::string str_column_default_width;
-  std::string str_single_column_width;
+    std::string str_single_column_width;
+    std::string str_single_row_height;
   std::string str_monitors;
   std::string str_window_heights;
   std::string str_column_widths;
 
   // Configuration globals
   StandardSize window_default_height;
-  StandardSize column_default_width;
-  StandardSize single_column_width;
+    StandardSize column_default_width;
+    StandardSize single_column_width;
+    StandardSize single_row_height;
   std::vector<StandardSize> window_heights;
   std::vector<StandardSize> column_widths;
 

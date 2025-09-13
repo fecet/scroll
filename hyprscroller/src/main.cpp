@@ -38,6 +38,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
   // values: oneeighth..one, default: one
   HyprlandAPI::addConfigValue(PHANDLE, "plugin:scroller:single_column_width",
                               Hyprlang::STRING{"one"});
+  // one value used when a column has a single window (column mode); default full height
+  // values: oneeighth..one, default: one
+  HyprlandAPI::addConfigValue(PHANDLE, "plugin:scroller:single_row_height",
+                              Hyprlang::STRING{"one"});
   // one value out of: { onesixth, onefourth, onethird, onehalf, twothirds, one
   // (default) }
   HyprlandAPI::addConfigValue(PHANDLE, "plugin:scroller:window_default_height",

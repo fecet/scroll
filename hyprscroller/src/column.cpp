@@ -10,19 +10,34 @@ extern std::function<SDispatchResult(std::string)> orig_moveFocusTo;
 extern ScrollerSizes scroller_sizes;
 
 Column::Column(PHLWINDOW cwindow, const Row *row)
-    : reorder(Reorder::Auto), row(row)
-{
-    // If this is the first column in the workspace, use the configured
-    // single-column width. Otherwise, fall back to the default column width.
+    : reorder(Reorder::Auto), row(row) {
+  // Choose width depending on layout mode
+  if (row->get_mode() == Mode::Row) {
+    // In row mode, honor single_column_width and column_default_width
     if (row->size() == 0)
-        width = scroller_sizes.get_single_column_width();
+      width = scroller_sizes.get_single_column_width();
     else
-        width = scroller_sizes.get_column_default_width(cwindow);
-    const Box &max = row->get_max();
-    Window *window = new Window(cwindow, max.y, max.h, width);
-    windows.push_back(window);
-    active = windows.first();
-    update_width(width, max.w);
+      width = scroller_sizes.get_column_default_width(cwindow);
+  } else {
+    // In column mode, do not apply column_default_width from config.
+    // If it's the first column, use full width; otherwise pick a sane default.
+    width = (row->size() == 0) ? StandardSize::One : StandardSize::OneHalf;
+  }
+
+  const Box &max = row->get_max();
+  Window *window = new Window(cwindow, max.y, max.h, width);
+  windows.push_back(window);
+  active = windows.first();
+  update_width(width, max.w);
+
+  // Initialize window height according to mode:
+  if (row->get_mode() == Mode::Row) {
+    // In row mode, ignore window_default_height; make single window full height
+    active->data()->update_height(StandardSize::One, max.h);
+  } else {
+    // In column mode, for single-window columns use single_row_height
+    active->data()->update_height(scroller_sizes.get_single_row_height(), max.h);
+  }
 
     // We know it will be located on the right of row->active
     const Column *col = row->get_active_column();
@@ -35,12 +50,16 @@ Column::Column(PHLWINDOW cwindow, const Row *row)
 }
 
 Column::Column(Window *window, StandardSize width, double maxw, const Row *row)
-    : width(width), reorder(Reorder::Auto), row(row)
-{
-    const Box &max = row->get_max();
-    windows.push_back(window);
-    active = windows.first();
-    update_width(width, maxw);
+    : width(width), reorder(Reorder::Auto), row(row) {
+  const Box &max = row->get_max();
+  windows.push_back(window);
+  active = windows.first();
+  update_width(width, maxw);
+  // New column created from an expelled window: if in column mode and single
+  // window, enforce single_row_height to get the expected behavior
+  if (row->get_mode() == Mode::Column && windows.size() == 1) {
+    active->data()->update_height(scroller_sizes.get_single_row_height(), max.h);
+  }
 }
 
 Column::Column(const Row *pRow, const Column *column, List<Window *> &pWindows)
@@ -86,8 +105,10 @@ Window *Column::get_window(PHLWINDOW window) const
 void Column::add_active_window(PHLWINDOW window)
 {
     reorder = Reorder::Auto;
-    // Store the default window width internally, regardless of that of the column
-    auto wwidth = scroller_sizes.get_column_default_width(window);
+    // Store the default window width internally.
+    // Only honor column_default_width in row mode.
+    auto wwidth = row->get_mode() == Mode::Row ?
+                  scroller_sizes.get_column_default_width(window) : width;
     auto w = new Window(window, row->get_max().y, row->get_max().h, wwidth);
 
     if (row->get_pinned_column() == this)
@@ -115,6 +136,16 @@ void Column::add_active_window(PHLWINDOW window)
         active = node;
     else
         window->m_noInitialFocus = true;
+
+    // If we just transitioned from 1 -> 2 windows in this column while in
+    // column mode, reset both to default heights
+    if (row->get_mode() == Mode::Column && windows.size() == 2) {
+        const double maxh = row->get_max().h;
+        for (auto it = windows.first(); it != nullptr; it = it->next()) {
+            auto h = scroller_sizes.get_window_default_height(it->data()->get_window());
+            it->data()->update_height(h, maxh);
+        }
+    }
 }
 
 void Column::remove_window(PHLWINDOW window)
@@ -134,6 +165,12 @@ void Column::remove_window(PHLWINDOW window)
                 win->data()->pin(false);
             windows.erase(win);
             delete win->data();
+            // If only one window remains and we are in column mode, apply
+            // single_row_height
+            if (row->get_mode() == Mode::Column && windows.size() == 1) {
+                const double maxh = row->get_max().h;
+                windows.first()->data()->update_height(scroller_sizes.get_single_row_height(), maxh);
+            }
             return;
         }
     }
@@ -352,6 +389,14 @@ void Column::admit_window(Window *window)
 {
     reorder = Reorder::Auto;
     active = windows.emplace_after(active, window);
+    // If column mode and now we have 2 windows, reset both to default heights
+    if (row->get_mode() == Mode::Column && windows.size() == 2) {
+        const double maxh = row->get_max().h;
+        for (auto it = windows.first(); it != nullptr; it = it->next()) {
+            auto h = scroller_sizes.get_window_default_height(it->data()->get_window());
+            it->data()->update_height(h, maxh);
+        }
+    }
 }
 
 Window *Column::expel_active(const Vector2D &gap_x)
@@ -365,6 +410,11 @@ Window *Column::expel_active(const Vector2D &gap_x)
     if (windows.size() == 1) {
         double maxw = width == StandardSize::Free ? active->data()->get_geom_w(gap_x) : row->get_max().w;
         update_width(active->data()->get_width(), maxw);
+        // And in column mode, apply single_row_height to the remaining window
+        if (row->get_mode() == Mode::Column) {
+            const double maxh = row->get_max().h;
+            active->data()->update_height(scroller_sizes.get_single_row_height(), maxh);
+        }
     }
     return window;
 }

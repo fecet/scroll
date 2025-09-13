@@ -91,6 +91,11 @@ StandardSize ScrollerSizes::get_single_column_width() {
   return single_column_width;
 }
 
+StandardSize ScrollerSizes::get_single_row_height() {
+  update();
+  return single_row_height;
+}
+
 // ScrollerSizes
 Mode ScrollerSizes::get_mode(PHLMONITOR monitor) {
   update();
@@ -286,6 +291,10 @@ void ScrollerSizes::update() {
       (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(
           PHANDLE, "plugin:scroller:single_column_width")
           ->getDataStaticPtr();
+  static auto const *single_row_height_str =
+      (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(
+          PHANDLE, "plugin:scroller:single_row_height")
+          ->getDataStaticPtr();
   static auto const *window_heights_str =
       (Hyprlang::STRING const *)HyprlandAPI::getConfigValue(
           PHANDLE, "plugin:scroller:window_heights")
@@ -307,6 +316,7 @@ void ScrollerSizes::update() {
   if (*window_default_height_str == str_window_default_height &&
       *column_default_width_str == str_column_default_width &&
       *single_column_width_str == str_single_column_width &&
+      *single_row_height_str == str_single_row_height &&
       *window_heights_str == str_window_heights &&
       *column_widths_str == str_column_widths &&
       *monitor_modes_str == str_monitors &&
@@ -319,12 +329,15 @@ void ScrollerSizes::update() {
       get_size_from_string(*column_default_width_str, StandardSize::OneHalf);
   single_column_width =
       get_size_from_string(*single_column_width_str, StandardSize::One);
+  single_row_height =
+      get_size_from_string(*single_row_height_str, StandardSize::One);
   update_sizes(window_heights, *window_heights_str, StandardSize::One);
   update_sizes(column_widths, *column_widths_str, StandardSize::OneHalf);
 
   str_window_default_height = *window_default_height_str;
   str_column_default_width = *column_default_width_str;
   str_single_column_width = *single_column_width_str;
+  str_single_row_height = *single_row_height_str;
   str_window_heights = *window_heights_str;
   str_column_widths = *column_widths_str;
   str_monitors = *monitor_modes_str;

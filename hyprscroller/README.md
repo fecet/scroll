@@ -961,10 +961,21 @@ columns back to their default widths (as defined by `column_default_width` or
 any matching window rule) so the layout returns to the normal proportions.
 Possible arguments are the same as `column_default_width`. Default is `one`.
 
+### `single_row_height`
+
+Height to use when a column has exactly one window (i.e. when working in
+`column` mode and a column becomes/sits single-window). This lets that lone
+window take a different size (commonly `one` for full height). When a second
+window is added to the column, hyprscroller automatically resets both windows
+to their default heights (as defined by `window_default_height` or any
+matching window rule).
+Possible arguments are the same as `window_default_height`. Default is `one`.
+
 ### `window_default_height`
 
-Determines the default height of a new window. This is useful if you are using
-a monitor in portrait mode and *column* mode.
+Determines the default height of a new window, and is applied only in
+`column` mode. This is useful if you are using a monitor in portrait mode and
+prefer stacking windows vertically.
 Possible arguments are: `oneeighth`, `onesixth`, `onefourth`, `onethird`,
 `threeeighths`, `onehalf`, `fiveeighths`, `twothirds`, `threequarters`,
 `fivesixths`, `seveneighths`, `one` (default).
