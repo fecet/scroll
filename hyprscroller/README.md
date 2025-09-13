@@ -1114,7 +1114,7 @@ configuration if you are using it.
 `monitor_options` can be used to define different default options for each
 monitor. Currently, the supported options are:
 
-1. `mode`: `r/row` for *row* mode and `c/col/column` for *column* mode.
+1. `mode`: `r/row` for *row* mode, `c/col/column` for *column* mode, or `a/auto` to derive the mode from the monitor orientation (portrait → `col`, landscape → `row`).
 2. `column_default_width`: Possible values are the same as the global
    `column_default_width` option.
 3. `window_default_height`: Possible values are the same as the global
@@ -1153,6 +1153,18 @@ This option is useful to configure ultra-wide monitors or those in non-standard
 orientations (for example portrait instead of landscape). You can define any
 combination. You can also use a configuration per monitor when you have very
 different geometries, for example a laptop and an external, bigger monitor.
+
+If you prefer not to list monitors, you can enable a global switch that derives
+the mode from orientation for any monitor without an explicit `mode` in
+`monitor_options`:
+
+```
+plugin:scroller:auto_mode_by_orientation = true
+```
+
+With this flag enabled, portrait monitors default to `mode = col` and landscape
+monitors to `mode = row`. Any explicit per-monitor `mode` in
+`monitor_options` overrides the global setting.
 
 ### `gesture_sensitivity`
 

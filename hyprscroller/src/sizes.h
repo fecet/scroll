@@ -8,78 +8,89 @@
 #include "enums.h"
 
 enum class StandardSize {
-    OneEighth = 0,
-    OneSixth,
-    OneFourth,
-    OneThird,
-    ThreeEighths,
-    OneHalf,
-    FiveEighths,
-    TwoThirds,
-    ThreeQuarters,
-    FiveSixths,
-    SevenEighths,
-    One,
-    Free
+  OneEighth = 0,
+  OneSixth,
+  OneFourth,
+  OneThird,
+  ThreeEighths,
+  OneHalf,
+  FiveEighths,
+  TwoThirds,
+  ThreeQuarters,
+  FiveSixths,
+  SevenEighths,
+  One,
+  Free
 };
 
-enum class Reorder {
-    Auto,
-    Lazy
-};
+enum class Reorder { Auto, Lazy };
 
 class ScrollerSizes {
 public:
-    ScrollerSizes() {}
-    ~ScrollerSizes() {}
+  ScrollerSizes() {}
+  ~ScrollerSizes() {}
 
-    Mode get_mode(PHLMONITOR monitor);
-    StandardSize get_window_default_height(PHLWINDOW window);
-    StandardSize get_column_default_width(PHLWINDOW window);
-    // Width to use when a workspace has a single column
-    StandardSize get_single_column_width();
-    StandardSize get_window_closest_height(PHLMONITORREF monitor, double fraction, int step);
-    StandardSize get_column_closest_width(PHLMONITORREF monitor, double fraction, int step);
-    StandardSize get_next_window_height(StandardSize size, int step);
-    StandardSize get_next_column_width(StandardSize size, int step);
-    StandardSize get_window_height(int index);
-    StandardSize get_column_width(int index);
-    StandardSize get_size_from_string(const std::string &size, StandardSize default_size);
+  Mode get_mode(PHLMONITOR monitor);
+  StandardSize get_window_default_height(PHLWINDOW window);
+  StandardSize get_column_default_width(PHLWINDOW window);
+  // Width to use when a workspace has a single column
+  StandardSize get_single_column_width();
+  StandardSize get_window_closest_height(PHLMONITORREF monitor, double fraction,
+                                         int step);
+  StandardSize get_column_closest_width(PHLMONITORREF monitor, double fraction,
+                                        int step);
+  StandardSize get_next_window_height(StandardSize size, int step);
+  StandardSize get_next_column_width(StandardSize size, int step);
+  StandardSize get_window_height(int index);
+  StandardSize get_column_width(int index);
+  StandardSize get_size_from_string(const std::string &size,
+                                    StandardSize default_size);
 
 private:
-    StandardSize get_next(const std::vector<StandardSize> &sizes, StandardSize size, int step) const;
-    StandardSize get_size(const std::vector<StandardSize> &sizes, int index) const;
-    StandardSize get_closest_size(const std::vector<StandardSize> &sizes, double fraction, int step) const;
-    void update();
-    void update_sizes(std::vector<StandardSize> &sizes, const std::string &option, StandardSize default_size);
-    void trim(std::string &str);
+  StandardSize get_next(const std::vector<StandardSize> &sizes,
+                        StandardSize size, int step) const;
+  StandardSize get_size(const std::vector<StandardSize> &sizes,
+                        int index) const;
+  StandardSize get_closest_size(const std::vector<StandardSize> &sizes,
+                                double fraction, int step) const;
+  void update();
+  void update_sizes(std::vector<StandardSize> &sizes, const std::string &option,
+                    StandardSize default_size);
+  void trim(std::string &str);
 
-    std::string str_window_default_height;
-    std::string str_column_default_width;
-    std::string str_single_column_width;
-    std::string str_monitors;
-    std::string str_window_heights;
-    std::string str_column_widths;
+  std::string str_window_default_height;
+  std::string str_column_default_width;
+  std::string str_single_column_width;
+  std::string str_monitors;
+  std::string str_window_heights;
+  std::string str_column_widths;
 
-    // Configuration globals
+  // Configuration globals
+  StandardSize window_default_height;
+  StandardSize column_default_width;
+  StandardSize single_column_width;
+  std::vector<StandardSize> window_heights;
+  std::vector<StandardSize> column_widths;
+
+  // Per monitor configuration
+  typedef struct {
+    std::string name;
+    Mode mode;
+    bool auto_by_orientation =
+        false; // if true, derive mode from monitor orientation
     StandardSize window_default_height;
     StandardSize column_default_width;
-    StandardSize single_column_width;
     std::vector<StandardSize> window_heights;
     std::vector<StandardSize> column_widths;
+  } MonitorData;
 
-    // Per monitor configuration
-    typedef struct {
-        std::string name;
-        Mode mode;
-        StandardSize window_default_height;
-        StandardSize column_default_width;
-        std::vector<StandardSize> window_heights;
-        std::vector<StandardSize> column_widths;
-    } MonitorData;
+  std::vector<MonitorData> monitors;
 
-    std::vector<MonitorData> monitors;
+  // Global toggle: if true and monitor has no explicit override, use
+  // orientation
+  bool global_auto_by_orientation = false;
+  int cached_auto_by_orientation =
+      -1; // cache last seen raw value to detect changes
 };
-
 
 #endif // SCROLLER_SIZES_H
