@@ -1,0 +1,141 @@
+name: Build Pacman Repository
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run daily at midnight UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+env:
+  BUILDER_VERSION: latest
+  PACKAGER: "hyprspiral <noreply@github.com>"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm \
+            base-devel \
+            cmake \
+            git \
+            hyprland \
+            ninja \
+            meson \
+            pkgconf \
+            wget
+
+      - name: Setup build user
+        run: |
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          chown -R builder:builder .
+
+      - name: Download pacman-repo-builder
+        run: |
+          wget -q "https://github.com/LizardByte/pacman-repo-builder/releases/latest/download/build-pacman-repo"
+          chmod +x build-pacman-repo
+
+      - name: Patch makepkg for container
+        run: |
+          ./build-pacman-repo patch-makepkg --replace
+
+      - name: Generate build configuration
+        run: |
+          ./build-pacman-repo print-config \
+            --repository /build/hyprspiral.db.tar.gz \
+            --container /build \
+            --require-pkgbuild \
+            --require-srcinfo \
+            --with-install-missing-dependencies true \
+            --with-clean-before-build true \
+            --with-clean-after-build true \
+            --with-force-rebuild true \
+            --with-pacman true \
+            --with-arch-filter x86_64 \
+            --with-check true \
+            --with-packager "${{ env.PACKAGER }}" \
+            --with-dereference-database-symlinks true \
+            pkgbuilds \
+            > build-pacman-repo.yaml
+
+      - name: Build packages
+        run: |
+          chown -R builder:builder .
+          sudo -u builder ./build-pacman-repo build
+
+      - name: List built packages
+        run: |
+          ls -la /build/*.pkg.tar.* || true
+          ls -la /build/*.db* || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            /build/*.pkg.tar.*
+            /build/*.db*
+            /build/*.files*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: packages
+
+      - name: List packages
+        run: ls -la packages/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: latest
+          name: Latest Release
+          files: |
+            packages/*.pkg.tar.*
+            packages/*.db*
+            packages/*.files*
+          body: |
+            ## Pacman Repository
+
+            This release contains the latest packages built from the main branch.
+
+            ### Installation
+
+            Add the following to your `/etc/pacman.conf`:
+
+            ```
+            [hyprspiral]
+            SigLevel = Optional
+            Server = https://github.com/${{ github.repository }}/releases/latest/download
+            ```
+
+            Then update your package database:
+            ```bash
+            sudo pacman -Sy
+            ```
+
+            ### Available Packages
+            - hyprland-spiral - Modified Hyprland with spiral layout support
+            - hyprland-plugin-spiral - Spiral layout plugin for Hyprland
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
