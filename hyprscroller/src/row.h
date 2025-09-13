@@ -2,6 +2,7 @@
 #define SCROLLER_ROW_H
 
 #include "column.h"
+#include <optional>
 
 class Row {
 public:
@@ -72,7 +73,9 @@ public:
     void set_fullscreen_mode(PHLWINDOW window, eFullscreenMode cur_mode, eFullscreenMode new_mode);
     void fit_size(FitSize fitsize);
     bool is_overview() const;
-    void toggle_overview();
+    // If viewport is provided, overview will be rendered into that box (absolute coordinates),
+    // aggregating mode across multiple workspaces. When set, content-scaling hooks are not used.
+    void toggle_overview(std::optional<Box> viewport = std::nullopt);
     void update_windows(const Box &oldmax, bool force);
     void recalculate_row_geometry();
 

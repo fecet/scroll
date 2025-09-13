@@ -20,6 +20,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <cmath>
 
 
 extern HANDLE PHANDLE;
@@ -1025,12 +1026,112 @@ void ScrollerLayout::fit_height(WORKSPACEID workspace, FitSize fitsize) {
     s->set_mode(mode, true);
 }
 
-void ScrollerLayout::toggle_overview(WORKSPACEID workspace) {
-    auto s = getRowForWorkspace(workspace);
-    if (s == nullptr) {
+void ScrollerLayout::toggle_overview(WORKSPACEID workspace, const std::string& scope) {
+    // Track ephemeral rows created only for aggregated overview, per monitor
+    static std::unordered_map<MONITORID, std::vector<WORKSPACEID>> aggTempRows;
+    // If explicitly requested workspace-only, use simple per-row toggle
+    if (scope != "mon" && scope != "all") {
+        auto s = getRowForWorkspace(workspace);
+        if (!s)
+            return;
+        s->toggle_overview();
         return;
     }
-    s->toggle_overview();
+
+    // Helper to toggle aggregated overview on a given monitor (by workspace ID on that monitor)
+    auto toggleAggregatedFor = [&](WORKSPACEID baseWSID) {
+        const auto PWS = g_pCompositor->getWorkspaceByID(baseWSID);
+        if (!PWS || !PWS->m_monitor) return;
+        auto PMON = PWS->m_monitor.lock();
+        Debug::log(LOG, "[hyprscroller] overview_all begin: baseWS={} mon={}", baseWSID, PMON->m_name);
+
+        // Collect rows with at least one window on this monitor
+        std::vector<Row*> rowsOnMon;
+        for (auto const& ws : g_pCompositor->getWorkspaces()) {
+            if (!ws || ws->m_isSpecialWorkspace) continue;
+            if (ws->m_monitor.lock() != PMON) continue;
+            if (ws->getWindows() <= 0) continue; // skip empty workspaces
+            auto r = getRowForWorkspace(ws->m_id);
+            if (!r) {
+                r = new Row(ws->m_id);
+                rows.push_back(r);
+                Debug::log(LOG, "[hyprscroller] overview_all: created Row for ws={}", ws->m_id);
+                for (auto const& w : g_pCompositor->m_windows) {
+                    if (!w->m_isMapped) continue;
+                    if (w->workspaceID() != ws->m_id) continue;
+                    w->unsetWindowData(PRIORITY_LAYOUT);
+                    w->updateWindowData();
+                    r->add_active_window(w);
+                }
+                aggTempRows[PMON->m_id].push_back(ws->m_id);
+            }
+            rowsOnMon.emplace_back(r);
+        }
+        if (rowsOnMon.empty()) return;
+
+        // If any row is in overview on this monitor, turn them all off
+        bool anyOverview = false;
+        for (auto &rw : rowsOnMon) {
+            if (rw->is_overview()) { anyOverview = true; break; }
+        }
+        if (anyOverview) {
+            for (auto &rw : rowsOnMon) {
+                if (rw->is_overview()) rw->toggle_overview();
+            }
+            if (!aggTempRows[PMON->m_id].empty()) {
+                for (auto wsid : aggTempRows[PMON->m_id]) {
+                    auto r = getRowForWorkspace(wsid);
+                    if (!r) continue;
+                    for (auto it = rows.first(); it != nullptr; it = it->next()) {
+                        if (it->data() == r) {
+                            rows.erase(it);
+                            delete r;
+                            break;
+                        }
+                    }
+                }
+                aggTempRows[PMON->m_id].clear();
+            }
+            Debug::log(LOG, "[hyprscroller] overview_all end: turning OFF for {} rows", rowsOnMon.size());
+            return;
+        }
+
+        // Compute tiling grid inside the current workspace's usable box
+        auto baseRow = getRowForWorkspace(baseWSID);
+        if (!baseRow) return;
+        const Box container = baseRow->get_max();
+        const size_t N = rowsOnMon.size();
+        const size_t cols = std::ceil(std::sqrt((double)N));
+        const size_t rowsN = std::ceil((double)N / (double)cols);
+        const double tileW = container.w / (double)cols;
+        const double tileH = container.h / (double)rowsN;
+
+        for (size_t i = 0; i < rowsOnMon.size(); ++i) {
+            auto &rw = rowsOnMon[i];
+            if (rw->is_overview()) rw->toggle_overview();
+        }
+        for (size_t i = 0; i < rowsOnMon.size(); ++i) {
+            const size_t r = i / cols;
+            const size_t c = i % cols;
+            Box vp(container.x + c * tileW, container.y + r * tileH, tileW, tileH);
+            rowsOnMon[i]->toggle_overview(vp);
+        }
+        g_pHyprRenderer->damageMonitor(PMON);
+        Debug::log(LOG, "[hyprscroller] overview_all end: enabled {} tiles", rowsOnMon.size());
+    };
+
+    if (scope == "all") {
+        for (auto PMON : g_pCompositor->m_monitors) {
+            WORKSPACEID wsid = PMON->activeSpecialWorkspaceID();
+            if (!wsid) wsid = PMON->activeWorkspaceID();
+            if (!wsid) continue;
+            toggleAggregatedFor(wsid);
+        }
+        return;
+    }
+
+    // Default: current monitor aggregated
+    toggleAggregatedFor(workspace);
 }
 
 PHLWINDOW ScrollerLayout::getActiveWindow(WORKSPACEID workspace) {
@@ -1246,6 +1347,8 @@ typedef struct JumpData {
     int keys_pressed = 0;
     int nkeys;
     unsigned int window_number = 0;
+    // monitors/workspaces for which we explicitly enabled overview-all
+    std::vector<WORKSPACEID> toggled_wsids;
     SP<HOOK_CALLBACK_FN> keyPressHookCallback;
 } JumpData;
 
@@ -1263,32 +1366,97 @@ static std::string generate_label(unsigned int i, const std::string &keys, unsig
     return label;
 }
 
-void ScrollerLayout::jump() {
+void ScrollerLayout::jump(const std::string& scope) {
     if (jumping)
         return;
 
     jumping = true;
     jump_data = new JumpData;
 
-    for (auto monitor : g_pCompositor->m_monitors) {
-        WORKSPACEID workspace_id = monitor->activeSpecialWorkspaceID();
-        if (!workspace_id) {
-            workspace_id = monitor->activeWorkspaceID();
-        }
-        auto s = getRowForWorkspace(workspace_id);
-        if (s == nullptr)
-            continue;
+    // Helper to process one monitor in aggregated mode
+    auto processMonitorAggregated = [&](PHLMONITOR monitor) {
+        if (!monitor)
+            return;
 
-        jump_data->workspaces.push_back({s, s->is_overview()});
+        // base workspace id used to toggle overview for this monitor
+        WORKSPACEID base_wsid = monitor->activeSpecialWorkspaceID();
+        if (!base_wsid)
+            base_wsid = monitor->activeWorkspaceID();
+        if (!base_wsid)
+            return;
+
+        // Discover candidate workspaces on this monitor
+        std::vector<WORKSPACEID> wsidsOnMon;
+        for (auto const& ws : g_pCompositor->getWorkspaces()) {
+            if (!ws || ws->m_isSpecialWorkspace)
+                continue;
+            if (ws->m_monitor.lock() != monitor)
+                continue;
+            if (ws->getWindows() <= 0)
+                continue;
+            wsidsOnMon.push_back(ws->m_id);
+        }
+
+        if (wsidsOnMon.empty())
+            return;
+
+        // Check how many rows are currently in overview (may be partial or aggregated)
+        size_t overviewCount = 0;
+        for (auto wsid : wsidsOnMon) {
+            if (auto r = getRowForWorkspace(wsid); r && r->is_overview())
+                overviewCount++;
+        }
+
+        // Ensure aggregated overview is ON:
+        // - if none in overview -> single toggle to enable aggregated
+        // - if some (partial or aggregated) ->
+        //     - if partial (overviewCount < wsidsOnMon.size()) toggle twice (off, then on)
+        //     - if already aggregated, leave as-is
+        if (overviewCount == 0) {
+            toggle_overview(base_wsid);
+            jump_data->toggled_wsids.push_back(base_wsid);
+        } else if (overviewCount < wsidsOnMon.size()) {
+            // turn off any existing per-row overviews
+            toggle_overview(base_wsid);
+            // turn aggregated on
+            toggle_overview(base_wsid);
+            jump_data->toggled_wsids.push_back(base_wsid);
+        }
+
+        // After ensuring overview-all, collect rows/windows on this monitor
+        for (auto wsid : wsidsOnMon) {
+            if (auto r = getRowForWorkspace(wsid)) {
+                jump_data->workspaces.push_back({r, r->is_overview()});
+                r->get_windows(jump_data->windows);
+            }
+        }
+    };
+
+    // Scope handling
+    if (scope == "ws") {
+        // Only current workspace: ensure per-row overview for that row
+        auto PMON = g_pCompositor->m_lastMonitor.lock();
+        if (!PMON) { delete jump_data; jumping = false; return; }
+        WORKSPACEID wsid = PMON->activeSpecialWorkspaceID();
+        if (!wsid) wsid = PMON->activeWorkspaceID();
+        if (!wsid) { delete jump_data; jumping = false; return; }
+        if (auto r = getRowForWorkspace(wsid)) {
+            jump_data->workspaces.push_back({r, r->is_overview()});
+            r->get_windows(jump_data->windows);
+            // ensure overview for labeling
+            if (!r->is_overview())
+                r->toggle_overview();
+        }
+    } else if (scope == "all") {
+        for (auto monitor : g_pCompositor->m_monitors)
+            processMonitorAggregated(monitor);
+    } else { // default: mon
+        processMonitorAggregated(g_pCompositor->m_lastMonitor.lock());
     }
-    if (jump_data->workspaces.size() == 0) {
+    if (jump_data->workspaces.empty()) {
         delete jump_data;
         jumping = false;
         return;
-    }
-
-    for (auto workspace : jump_data->workspaces) {
-        workspace.row->get_windows(jump_data->windows);
     }
     if (jump_data->windows.size() == 0) {
         delete jump_data;
@@ -1311,12 +1479,7 @@ void ScrollerLayout::jump() {
     else
         jump_data->nkeys = std::ceil(std::log10(jump_data->windows.size()) / std::log10(jump_data->keys.size()));
 
-    // Set overview mode for those workspaces that are not
-    for (auto workspace : jump_data->workspaces) {
-        if (!workspace.overview) {
-            workspace.row->toggle_overview();
-        }
-    }
+    // At this point, overview-all is active on any monitor we needed.
 
     // Set decorations (in overview mode)
     int i = 0;
@@ -1369,11 +1532,17 @@ void ScrollerLayout::jump() {
             jump_data->windows[i]->removeWindowDeco(jump_data->decorations[i]);
         }
 
-        // Restore original overview
-        for (auto workspace : jump_data->workspaces) {
-            if (!workspace.overview) {
-                workspace.row->toggle_overview();
+        // Restore original overview state
+        if (jump_data->toggled_wsids.empty()) {
+            // ws-scope: toggle back per-row
+            for (auto workspace : jump_data->workspaces) {
+                if (!workspace.overview)
+                    workspace.row->toggle_overview();
             }
+        } else {
+            // aggregated: toggle back per monitor we enabled
+            for (auto wsid : jump_data->toggled_wsids)
+                g_ScrollerLayout->toggle_overview(wsid);
         }
         if (focus) {
             update_relative_cursor_coords(jump_data->from_window.lock());

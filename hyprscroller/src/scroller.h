@@ -57,7 +57,8 @@ public:
     void fit_size(WORKSPACEID workspace, FitSize);
     void fit_width(WORKSPACEID workspace, FitSize);
     void fit_height(WORKSPACEID workspace, FitSize);
-    void toggle_overview(WORKSPACEID workspace);
+    // scope: "ws" (current workspace), "mon" (current monitor), "all" (all monitors)
+    void toggle_overview(WORKSPACEID workspace, const std::string& scope = "mon");
 
     void marks_add(const std::string &name);
     void marks_delete(const std::string &name);
@@ -82,7 +83,7 @@ public:
     void trailmark_next();
     void trailmark_prev();
 
-    void jump();
+    void jump(const std::string& scope = "mon");
 
     void post_event(WORKSPACEID workspace, const std::string &event);
 

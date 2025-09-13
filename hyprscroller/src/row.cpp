@@ -4,8 +4,10 @@
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/managers/LayoutManager.hpp>
 #include <format>
+#include <unordered_map>
 
 #include "common.h"
 #include "functions.h"
@@ -16,6 +18,9 @@ extern HANDLE PHANDLE;
 extern Overview *overviews;
 extern std::function<SDispatchResult(std::string)> orig_moveFocusTo;
 extern ScrollerSizes scroller_sizes;
+
+// Save per-workspace render offsets while in aggregated overview so we can neutralize them
+static std::unordered_map<WORKSPACEID, Vector2D> g_saved_ws_offsets;
 
 Row::Row(WORKSPACEID workspace)
     : workspace(workspace), overview(false),
@@ -1149,7 +1154,7 @@ bool Row::is_overview() const
     return overview;
 }
 
-void Row::toggle_overview()
+void Row::toggle_overview(std::optional<Box> viewport)
 {
     if (columns.size() == 0)
         return;
@@ -1159,6 +1164,7 @@ void Row::toggle_overview()
     PHLMONITOR monitor = window->m_workspace->m_monitor.lock();
     overview = !overview;
     post_event("overview");
+    Debug::log(LOG, "[hyprscroller] row toggle_overview ws={} on={} viewport={}" , workspace, overview ? 1 : 0, viewport.has_value() ? 1 : 0);
     static auto *const *overview_scale_content = (Hyprlang::INT *const *)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scroller:overview_scale_content")->getDataStaticPtr();
     if (overview) {
         // Turn off fullscreen mode if enabled
@@ -1184,13 +1190,23 @@ void Row::toggle_overview()
         }
         double w = bmax.x - bmin.x;
         double h = bmax.y - bmin.y;
-        double scale = std::min(max.w / w, max.h / h);
+        // diagnostic: total column width (sum) vs bounding width
+        double wsum = 0.0;
+        for (auto c = columns.first(); c != nullptr; c = c->next())
+            wsum += c->data()->get_geom_w();
 
-        bool overview_scaled;
-        if (**overview_scale_content && overviews->enable(workspace)) {
+        // When a viewport is provided (all-workspaces overview), force the non-hooked path
+        const bool force_unscaled = viewport.has_value();
+        const Box container = viewport.has_value() ? viewport.value() : max;
+        double scale = std::min(container.w / w, container.h / h);
+        // In aggregated overview, never upscale beyond 1: keep content within the tile
+        if (viewport.has_value())
+            scale = std::min(1.0, scale);
+        Debug::log(LOG, "[hyprscroller]   bbox w={:.1f} h={:.1f} sumW={:.1f} container=({:.1f}x{:.1f}) scale={:.3f}", w, h, wsum, container.w, container.h, scale);
+
+        bool overview_scaled = false;
+        if (!force_unscaled && **overview_scale_content && overviews->enable(workspace)) {
             overview_scaled = true;
-        } else {
-            overview_scaled = false;
         }
 
         if (overview_scaled) {
@@ -1209,22 +1225,54 @@ void Row::toggle_overview()
             g_pCompositor->updateSuspendedStates();
 
             overviews->set_scale(workspace, scale);
+            Debug::log(LOG, "[hyprscroller] row {} scaled overview with hooks scale={:.3f}", workspace, scale);
         } else {
-            Vector2D offset(0.5 * (max.w - w * scale), 0.5 * (max.h - h * scale));
+            // viewport (aggregated) path needs hooks for visibility + force rendering
+            if (viewport.has_value()) {
+                overviews->enable(workspace);
+                if (auto PWS = g_pCompositor->getWorkspaceByID(workspace)) {
+                    PWS->m_forceRendering = true;
+                    // neutralize workspace render offset so windows draw where we place them
+                    if (!g_saved_ws_offsets.contains(workspace))
+                        g_saved_ws_offsets[workspace] = PWS->m_renderOffset->value();
+                    PWS->m_renderOffset->setValueAndWarp(Vector2D{});
+                    *PWS->m_renderOffset = Vector2D{};
+                }
+                // visible gating is satisfied by placing within monitor; no force-visible needed
+            }
+            Vector2D offset(0.5 * (container.w - w * scale), 0.5 * (container.h - h * scale));
             for (auto c = columns.first(); c != nullptr; c = c->next()) {
                 Column *col = c->data();
                 col->push_overview_geom();
                 Vector2D cheight = col->get_height();
-                col->set_geom_pos(offset.x + max.x + (col->get_geom_x() - bmin.x) * scale, offset.y + max.y + (cheight.x - bmin.y) * scale);
+                const double beforeW = col->get_geom_w();
+                col->set_geom_pos(container.x + offset.x + (col->get_geom_x() - bmin.x) * scale,
+                                  container.y + offset.y + (cheight.x - bmin.y) * scale);
                 col->set_geom_w(col->get_geom_w() * scale);
-                Vector2D start(offset.x + max.x, offset.y + max.y);
+                Debug::log(LOG, "[hyprscroller]   col beforeW={:.1f} afterW={:.1f}", beforeW, col->get_geom_w());
+                Vector2D start(container.x + offset.x, container.y + offset.y);
                 col->scale(bmin, start, scale, gap);
             }
             adjust_overview_columns();
             overviews->set_scale(workspace, 1.0f);
+            // no extra render-time transforms needed
+            Debug::log(LOG, "[hyprscroller] row {} unhooked overview scale=1 viewport={} forceRendering={}", workspace, viewport.has_value() ? 1 : 0, (bool)g_pCompositor->getWorkspaceByID(workspace)->m_forceRendering);
+            // no need to toggle hidden now; fade alpha fix ensures visibility
         }
     } else {
         overviews->disable(workspace);
+        if (auto PWS = g_pCompositor->getWorkspaceByID(workspace)) {
+            PWS->m_forceRendering = false;
+            // restore workspace render offset if we changed it
+            if (g_saved_ws_offsets.contains(workspace)) {
+                const auto off = g_saved_ws_offsets[workspace];
+                PWS->m_renderOffset->setValueAndWarp(off);
+                *PWS->m_renderOffset = off;
+                g_saved_ws_offsets.erase(workspace);
+            }
+        }
+        // no pushForceVisible/pop needed anymore
+        // no aggregated render-time metadata to clear
         g_pLayoutManager->getCurrentLayout()->recalculateMonitor(monitor->m_id);
         g_pHyprRenderer->damageMonitor(monitor);
         g_pConfigManager->ensureVRR(monitor);

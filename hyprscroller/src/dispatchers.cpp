@@ -289,12 +289,24 @@ namespace dispatchers {
 
         return {};
     }
-    SDispatchResult dispatch_toggleoverview(std::string) {
+    SDispatchResult dispatch_toggleoverview(std::string arg) {
         auto workspace = workspace_for_action();
         if (workspace == -1)
             return { .success = false, .error = "scroller:toggleoverview: invalid workspace" };
 
-        g_ScrollerLayout->toggle_overview(workspace);
+        // arg: empty -> current workspace; "mon" -> current monitor; "all" -> all monitors
+        std::string scope;
+        if (arg.empty())
+            scope = "ws";
+        else {
+            auto args = CVarList(arg);
+            auto s = std::string(args[0]);
+            if (s == "all") scope = "all";
+            else if (s == "mon") scope = "mon";
+            else scope = "ws";
+        }
+
+        g_ScrollerLayout->toggle_overview(workspace, scope);
 
         return {};
     }
@@ -451,11 +463,20 @@ namespace dispatchers {
 
         return {};
     }
-    SDispatchResult dispatch_jump(std::string) {
+    SDispatchResult dispatch_jump(std::string arg) {
         if (g_pLayoutManager->getCurrentLayout() != g_ScrollerLayout.get())
             return { .success = false, .error = "scroller:jump: called while not running hyprscroller" };
 
-        g_ScrollerLayout->jump();
+        std::string scope;
+        if (arg.empty()) scope = "mon"; else {
+            auto args = CVarList(arg);
+            auto s = std::string(args[0]);
+            if (s == "all") scope = "all";
+            else if (s == "mon") scope = "mon";
+            else scope = "ws"; // any other means current workspace
+        }
+
+        g_ScrollerLayout->jump(scope);
 
         return {};
     }
