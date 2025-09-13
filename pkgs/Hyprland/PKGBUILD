@@ -3,12 +3,12 @@
 # Contributor: Brenno Lemos <brenno@syndel.is>
 # Contributor: Gabriel Fox <inbox@gabrielfox.dev>
 
-pkgname=hyprland
+pkgname=hyprland-scroll
 pkgver=0.50.1
 pkgrel=1
-pkgdesc='a highly customizable dynamic tiling Wayland compositor'
+pkgdesc='Hyprland with hyprscroller layout plugin bundled'
 arch=(x86_64 aarch64)
-url="file:///home/rok/scroller/Hyprland"
+url="https://github.com/fecet/scroll"
 license=(BSD-3-Clause)
 depends=(cairo # libcairo.so
          aquamarine libaquamarine.so
@@ -65,15 +65,41 @@ optdepends=('cmake: to build and install plugins using hyprpm'
             'hyprland-protocols: to build and install plugins using hyprpm'
             'meson: to build and install plugins using hyprpm'
             'uwsm: the recommended way to start Hyprland')
-provides=(wayland-compositor)
+provides=(wayland-compositor "hyprland=${pkgver}")
+conflicts=(hyprland)
 _archive="${pkgname^}-$pkgver"
-source=("git+$url")
+source=("git+${url}")
 sha256sums=('SKIP')
 
 prepare() {
-	ln -sf Hyprland "$_archive"
+	# Expose Hyprland subdir under a stable name expected by the rest of the PKGBUILD
+	ln -sf scroll/Hyprland "$_archive"
 	cd "$_archive"
-  git submodule update --init --recursive  
+
+	# Hyprland is included via subtree, but Hyprland itself uses submodules
+	# in its own tree (listed in .gitmodules). Since this is not a nested repo,
+	# `git submodule update` from the root will not initialize these.
+	# Populate the submodule directories manually if they are empty.
+	if [[ -f .gitmodules ]]; then
+		while read -r key path; do
+			name="${key#submodule.}"
+			name="${name%.path}"
+			url=$(git config -f .gitmodules "submodule.${name}.url")
+			branch=$(git config -f .gitmodules "submodule.${name}.branch" || true)
+			if [[ -z "$path" || -z "$url" ]]; then
+				continue
+			fi
+			# Clone only if the dir is missing or empty
+			if [[ ! -d "$path" || -z "$(ls -A "$path" 2>/dev/null)" ]]; then
+				rm -rf -- "$path"
+				if [[ -n "$branch" ]]; then
+					git clone --depth 1 -b "$branch" "$url" "$path"
+				else
+					git clone --depth 1 "$url" "$path"
+				fi
+			fi
+		done < <(git config -f .gitmodules --get-regexp '^submodule\..*\.path')
+	fi
 	# sed -i -e '/^release:/{n;s/-D/-DCMAKE_SKIP_RPATH=ON -D/}' Makefile
 	# Workaround for https://gitlab.archlinux.org/archlinux/packaging/packages/hyprland/-/issues/15
 	# rm -fv scripts/generateVersion.sh
@@ -82,6 +108,13 @@ prepare() {
 build() {
 	cd "$_archive"
 	make release PREFIX=/usr
+
+	# Build hyprscroller against the freshly-built Hyprland (use its pkg-config file from build dir)
+	local _hyprscroll_dir="$srcdir/scroll/hyprscroller"
+	if [[ -d "${_hyprscroll_dir}" ]]; then
+		export PKG_CONFIG_PATH="${PWD}/build:${PKG_CONFIG_PATH}"
+		make -C "${_hyprscroll_dir}" release PREFIX=/usr
+	fi
 }
 
 package() {
@@ -89,4 +122,10 @@ package() {
 	make DESTDIR="$pkgdir" install
 	rm -fv "$pkgdir/usr/include/hyprland/src/version.h.in"
 	install -Dm0644 -t "$pkgdir/usr/share/licenses/$pkgname/" LICENSE
+
+	# Install hyprscroller plugin system-wide if it was built
+	local _hyprscroll_dir="$srcdir/scroll/hyprscroller"
+	if [[ -f "${_hyprscroll_dir}/hyprscroller.so" ]]; then
+		install -Dm0755 -t "$pkgdir/usr/lib" "${_hyprscroll_dir}/hyprscroller.so"
+	fi
 }
