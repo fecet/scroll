@@ -54,6 +54,7 @@ depends=(cairo # libcairo.so
          xcb-util-wm # libxcb-ewmh.so  libxcb-icccm.so 
          xorg-xwayland)
 makedepends=(cmake
+             cpio
              glaze
              hyprland-protocols
              meson
@@ -106,15 +107,26 @@ prepare() {
 }
 
 build() {
-	cd "$_archive"
-	make release PREFIX=/usr
+    cd "$_archive"
+    make release PREFIX=/usr
 
-	# Build hyprscroller against the freshly-built Hyprland (use its pkg-config file from build dir)
-	local _hyprscroll_dir="$srcdir/scroll/hyprscroller"
-	if [[ -d "${_hyprscroll_dir}" ]]; then
-		export PKG_CONFIG_PATH="${PWD}/build:${PKG_CONFIG_PATH}"
-		make -C "${_hyprscroll_dir}" release PREFIX=/usr
-	fi
+    # Stage Hyprland headers locally and point pkg-config there,
+    # so hyprscroller builds against the just-built Hyprland instead of system
+    local _headers_dir="$srcdir/scroll/headers"
+    mkdir -p "${_headers_dir}"
+    make installheaders PREFIX="${_headers_dir}"
+    if [[ -f "${_headers_dir}/share/pkgconfig/hyprland.pc" ]]; then
+        # Rewrite the .pc prefix to our staged include dir
+        sed -i -E "s|^prefix=.*$|prefix=${_headers_dir}/include|" \
+            "${_headers_dir}/share/pkgconfig/hyprland.pc"
+    fi
+
+    # Build hyprscroller against the staged headers/pkg-config
+    local _hyprscroll_dir="$srcdir/scroll/hyprscroller"
+    if [[ -d "${_hyprscroll_dir}" ]]; then
+        export PKG_CONFIG_PATH="${_headers_dir}/share/pkgconfig:${PKG_CONFIG_PATH}"
+        make -C "${_hyprscroll_dir}" release PREFIX=/usr
+    fi
 }
 
 package() {
